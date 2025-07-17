@@ -9,6 +9,8 @@ const API_KEY_LEN: usize = 2;
 const API_VERSION_LEN: usize = 2;
 const CORRELATION_ID_LEN: usize = 4;
 
+const HEADER_LEN: usize = MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN + CORRELATION_ID_LEN; // 4 + 2 + 2 + 4 = 12 bytes
+
 /// Handles a single incoming TCP connection.
 /// Reads the request, extracts the correlation ID, and sends back the response.
 fn handle_client(mut stream: TcpStream) -> io::Result<()> {
@@ -25,6 +27,14 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     );
     println!("Total message size indicated: {} bytes", total_message_size);
 
+    // Basic validation: ensure the message is at least as long as the header
+    if total_message_size < HEADER_LEN as u32 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Message size {} is smaller than minimum header size {}", total_message_size, HEADER_LEN)
+        ));
+    }
+
     //Now, read the rest of the message (api_key, api_version, correlation_id, and if any a body)
     //I already read the MESSAGE_SIZE_LEN so it will be `total_message_size - MESSAGE_SIZE_LEN`
     //more bytes
@@ -32,15 +42,21 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     let mut full_request_buffer = vec![0; remaining_bytes];
     stream.read_exact(&mut full_request_buffer)?;
 
-    // Combine for easier access (optional, could work with separate buffers)
-    let full_request_bytes = [initial_bytes, full_request_buffer].concat();
+    let correlation_id_offset_in_remaining = API_KEY_LEN + API_VERSION_LEN;
+
+    // Verify bounds before slicing to prevent panic
+    if remaining_bytes < correlation_id_offset_in_remaining + CORRELATION_ID_LEN {
+         return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Received message too short to contain full correlation ID"
+        ));
+    }
 
     //Extract the correlation ID from bytes 8-11
-    let correlation_id_offset = MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN;
-    let correlation_id_bytes_slice = &full_request_bytes[
-        correlation_id_offset
+    let correlation_id_bytes_slice = &full_request_buffer[
+        correlation_id_offset_in_remaining
         ..
-        correlation_id_offset + CORRELATION_ID_LEN
+        correlation_id_offset_in_remaining + CORRELATION_ID_LEN
     ];
 
     let correlation_id = u32::from_be_bytes(
@@ -54,7 +70,7 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
     //Build the response
     //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request]
-    let response_message_size: u32 = CORRELATION_ID_LEN as u32;
+    let response_message_size: u32 = 0;
     let response_message_size_bytes = response_message_size.to_be_bytes();
     let correlation_id_response_bytes = correlation_id.to_be_bytes();
 
