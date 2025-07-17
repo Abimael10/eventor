@@ -1,34 +1,46 @@
 #![allow(unused_imports)]
 
 use std::io::{self, Write, Read};
-
 use std::net::{TcpListener, TcpStream};
+use std::convert::TryInto; //To use try_into() on slices
 
 const MESSAGE_SIZE_LEN: usize = 4;
 const API_KEY_LEN: usize = 2;
 const API_VERSION_LEN: usize = 2;
 const CORRELATION_ID_LEN: usize = 4;
 
-const HEADER_LEN: usize = MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN + CORRELATION_ID_LEN; // 4 + 2 + 2 + 4 = 12 bytes
-
 /// Handles a single incoming TCP connection.
 /// Reads the request, extracts the correlation ID, and sends back the response.
 fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     println!("Handling connection from: {}", stream.peer_addr()?);
 
-    //Creating a buffer to read the request header into
-    let mut header_buffer = vec![0; HEADER_LEN];
+    //Initial buffer to read just the message_size
+    let mut initial_bytes = vec![0; MESSAGE_SIZE_LEN];
 
-    //Read at least 12 bytes from the stream
-    //'read_exact' will block until 12 bytes are read or an error occurs (maybe a connection closed)
-    stream.read_exact(&mut header_buffer)?;
-    println!("Read header: {:?}", header_buffer);
+    stream.read_exact(&mut initial_bytes)?;
+    let total_message_size = u32::from_be_bytes(
+        initial_bytes.as_slice()
+        .try_into()
+        .unwrap_or_else(|_| [0; 4])
+    );
+    println!("Total message size indicated: {} bytes", total_message_size);
+
+    //Now, read the rest of the message (api_key, api_version, correlation_id, and if any a body)
+    //I already read the MESSAGE_SIZE_LEN so it will be `total_message_size - MESSAGE_SIZE_LEN`
+    //more bytes
+    let remaining_bytes = total_message_size as usize - MESSAGE_SIZE_LEN;
+    let mut full_request_buffer = vec![0; remaining_bytes];
+    stream.read_exact(&mut full_request_buffer)?;
+
+    // Combine for easier access (optional, could work with separate buffers)
+    let full_request_bytes = [initial_bytes, full_request_buffer].concat();
 
     //Extract the correlation ID from bytes 8-11
-    let correlation_id_bytes_slice = &header_buffer[
-        MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN
+    let correlation_id_offset = MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN;
+    let correlation_id_bytes_slice = &full_request_bytes[
+        correlation_id_offset
         ..
-        MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN + CORRELATION_ID_LEN
+        correlation_id_offset + CORRELATION_ID_LEN
     ];
 
     let correlation_id = u32::from_be_bytes(
