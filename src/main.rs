@@ -31,8 +31,6 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN + CORRELATION_ID_LEN
     ];
 
-    println!("Testing the slice: {:?}", correlation_id_bytes_slice);
-
     let correlation_id = u32::from_be_bytes(
         correlation_id_bytes_slice
             .try_into()
