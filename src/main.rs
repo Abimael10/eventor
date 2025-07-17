@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use std::io::{self, Write, Read};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, Shutdown};
 use std::convert::TryInto; //To use try_into() on slices
 
 const MESSAGE_SIZE_LEN: usize = 4;
@@ -82,8 +82,13 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
     //Send the response back to the client
     stream.write_all(&response)?;
+
+    //Just to pass the fucking test, those idiots set a rule up their fucking asshole, 5:08 AM
+    //dealing with this shit
+    stream.flush()?;
     println!("Response sent.");
 
+    stream.shutdown(Shutdown::Both)?; // Shutdown both read and write
     Ok(())
 }
 
