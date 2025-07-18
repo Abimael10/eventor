@@ -65,7 +65,7 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     let partitions_count: u8 = 1; // compact array: 0 partitions + 1 = 1
     let topic_authorized_operations: u32 = 0; // No operations
     let topic_tagged_fields: u8 = 0;
-    let next_cursor: u8 = 0; // null next_cursor
+    let next_cursor: u8 = 0; // null next_cursor (encoded as 0 for nullable)
     let response_tagged_fields: u8 = 0;
     
     // Calculate message size: everything after the message_size field
@@ -88,7 +88,7 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     response.extend_from_slice(&topic_authorized_operations.to_be_bytes());
     response.extend_from_slice(&[topic_tagged_fields]);
     
-    // Next cursor and response tagged fields
+    // Next cursor (null) and response tagged fields
     response.extend_from_slice(&[next_cursor]);
     response.extend_from_slice(&[response_tagged_fields]);
     
