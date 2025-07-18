@@ -95,18 +95,22 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     let error_code_bytes = error_code.to_be_bytes();
 
     //Handle API versions request
-    let api_count: u32 = 1; //I can handle 1 API
+    //The API version requires to have a compact array containing the required API count which is
+    //only for now. After looking it up remember the compact array format works like this: [1 API +
+    //1] encoded as varint that will leave the digit in u8 type to be equal to 2.
+    let api_count_array: u8 = 2;
     let api_key: u16 = 18; //APIversions
     let min_version: u16 = 0; //minimal version since I only work with version 0 through 4
     let max_version: u16 = 4;
     let tagged_fields: u8 = 0; //Empty tagged fields
 
-    let mut response = Vec::with_capacity(MESSAGE_SIZE_LEN + CORRELATION_ID_LEN + 2 + 4 + 2 + 2 + 2 + 1);
+    let mut response = Vec::with_capacity(MESSAGE_SIZE_LEN + CORRELATION_ID_LEN + 2 /*error code*/ + 1 /*api_count_array*/ + 2 /*api key*/ + 2 /*api min*/ + 2 /*api max*/ + 1 /*tagged fields*/);
     response.extend_from_slice(&response_message_size_bytes);
     response.extend_from_slice(&correlation_id_response_bytes);
     response.extend_from_slice(&error_code_bytes);
     //Addin API versions info to the response
-    response.extend_from_slice(&api_count.to_be_bytes());
+    response.extend_from_slice(&[api_count_array]); //This is already converted so we add it as a
+                                                    //borrowed format of array.
     response.extend_from_slice(&api_key.to_be_bytes());
     response.extend_from_slice(&min_version.to_be_bytes());
     response.extend_from_slice(&max_version.to_be_bytes());
