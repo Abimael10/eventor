@@ -66,12 +66,15 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     let partitions_count: u8 = 1; // compact array: 0 partitions + 1 = 1
     let topic_authorized_operations: u32 = 0; // No operations
     let topic_tagged_fields: u8 = 0;
-    let next_cursor_null: u8 = 0; // null next_cursor (encoded as 0 for flexible version nullable)
+    // For unknown topics, we still need to provide a next_cursor with topic name
+    let next_cursor_topic_name = "unknown-topic-qux";
+    let next_cursor_topic_name_len: u8 = (next_cursor_topic_name.len() + 1) as u8;
+    let next_cursor_partition_index: i32 = 0;
     let response_tagged_fields: u8 = 0;
     
     // Calculate message size: everything after the message_size field
-    // Response Header v1: correlation_id(4) + header_tag_buffer(1) + throttle_time(4) + topic_count(1) + [topic: error_code(2) + topic_name_len(1) + topic_name + topic_id(16) + is_internal(1) + partitions(1) + topic_authorized_operations(4) + topic_tagged_fields(1)] + next_cursor(1) + response_tagged_fields(1)
-    let message_size = 4 + 1 + 4 + 1 + (2 + 1 + topic_name.len() + 16 + 1 + 1 + 4 + 1) + 1 + 1;
+    // Response Header v1: correlation_id(4) + header_tag_buffer(1) + throttle_time(4) + topic_count(1) + [topic: error_code(2) + topic_name_len(1) + topic_name + topic_id(16) + is_internal(1) + partitions(1) + topic_authorized_operations(4) + topic_tagged_fields(1)] + next_cursor[topic_name_len(1) + topic_name + partition_index(4) + tag_buffer(1)] + response_tagged_fields(1)
+    let message_size = 4 + 1 + 4 + 1 + (2 + 1 + topic_name.len() + 16 + 1 + 1 + 4 + 1) + (1 + next_cursor_topic_name.len() + 4 + 1) + 1;
     let header_tag_buffer: u8 = 0; // TAG_BUFFER for Response Header v1
     
     // Build response
@@ -91,8 +94,11 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     response.extend_from_slice(&topic_authorized_operations.to_be_bytes());
     response.extend_from_slice(&[topic_tagged_fields]);
     
-    // Next cursor (null) and response tagged fields
-    response.extend_from_slice(&[next_cursor_null]);
+    // Next cursor (with topic name and partition index) and response tagged fields
+    response.extend_from_slice(&[next_cursor_topic_name_len]);
+    response.extend_from_slice(next_cursor_topic_name.as_bytes());
+    response.extend_from_slice(&next_cursor_partition_index.to_be_bytes());
+    response.extend_from_slice(&[0]); // next_cursor tagged fields
     response.extend_from_slice(&[response_tagged_fields]);
     
     response
