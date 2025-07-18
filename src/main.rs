@@ -89,7 +89,7 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
     //error_code][4 bytes: api_count][2 bytes: api_key][2 bytes: min_version][2 bytes:
     //max_version][1 bytes: tagged_fields]
-    let response_message_size: u32 = 17; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count (4) + api key (2) + api minimal (2) + api max (2) + tagged fields (1) -- So far, after the message size bytes which are 4, we send an extra 17 bytes making a total of 21 bytes for the response.
+    let response_message_size: u32 = 14; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count compact array (1) + api key (2) + api minimal (2) + api max (2) + tagged fields (1) -- So far, after the message size bytes which are 4, we send an extra 14 bytes making a total of 18 bytes for the response.
     let response_message_size_bytes = response_message_size.to_be_bytes();
     let correlation_id_response_bytes = correlation_id.to_be_bytes();
     let error_code_bytes = error_code.to_be_bytes();
@@ -97,7 +97,7 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     //Handle API versions request
     //The API version requires to have a compact array containing the required API count which is
     //only for now. After looking it up remember the compact array format works like this: [1 API +
-    //1] encoded as varint that will leave the digit in u8 type to be equal to 2.
+    //1] encoded as varint 0x02 that will leave the digit in u8 type to be equal to 2.
     let api_count_array: u8 = 2;
     let api_key: u16 = 18; //APIversions
     let min_version: u16 = 0; //minimal version since I only work with version 0 through 4
