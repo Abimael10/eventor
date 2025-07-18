@@ -118,7 +118,7 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         let max_version_1: u16 = 4;
         let api_tagged_fields_1: u8 = 0;
         
-        // Second API: DescribeTopicPartitions
+        // Second API: DescribeTopicPartitions ..
         let api_key_2: u16 = 75; //DescribeTopicPartitions
         let min_version_2: u16 = 0;
         let max_version_2: u16 = 0;
