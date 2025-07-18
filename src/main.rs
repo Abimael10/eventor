@@ -87,8 +87,9 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
     //Build the response
     //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
-    //api_version_response_bytes]
-    let response_message_size: u32 = 6; //correlation ID (4) + error code (2)
+    //error_code][4 bytes: api_count][2 bytes: api_key][2 bytes: min_version][2 bytes:
+    //max_version][1 bytes: tagged_fields]
+    let response_message_size: u32 = 17; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count (4) + api key (2) + api minimal (2) + api max (2) + tagged fields (1) -- So far, after the message size bytes which are 4, we send an extra 17 bytes making a total of 21 bytes for the response.
     let response_message_size_bytes = response_message_size.to_be_bytes();
     let correlation_id_response_bytes = correlation_id.to_be_bytes();
     let error_code_bytes = error_code.to_be_bytes();
