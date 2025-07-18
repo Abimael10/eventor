@@ -93,15 +93,23 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     let correlation_id_response_bytes = correlation_id.to_be_bytes();
     let error_code_bytes = error_code.to_be_bytes();
 
-    let mut response = Vec::with_capacity(MESSAGE_SIZE_LEN + CORRELATION_ID_LEN + 2); //+2 bytes
-                                                                                      //are the
-                                                                                      //error code
-                                                                                      //bytes, hard
-                                                                                      //coded for
-                                                                                      //simplicity
+    //Handle API versions request
+    let api_count: u32 = 1; //I can handle 1 API
+    let api_key: u16 = 18; //APIversions
+    let min_version: u16 = 0; //minimal version since I only work with version 0 through 4
+    let max_version: u16 = 4;
+    let tagged_fields: u8 = 0; //Empty tagged fields
+
+    let mut response = Vec::with_capacity(MESSAGE_SIZE_LEN + CORRELATION_ID_LEN + 2 + 4 + 2 + 2 + 2 + 1);
     response.extend_from_slice(&response_message_size_bytes);
     response.extend_from_slice(&correlation_id_response_bytes);
     response.extend_from_slice(&error_code_bytes);
+    //Addin API versions info to the response
+    response.extend_from_slice(&api_count.to_be_bytes());
+    response.extend_from_slice(&api_key.to_be_bytes());
+    response.extend_from_slice(&min_version.to_be_bytes());
+    response.extend_from_slice(&max_version.to_be_bytes());
+    response.extend_from_slice(&[tagged_fields]);
 
     println!("Sending response: {:?}", response);
 
