@@ -35,16 +35,15 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         };
         println!("Total message size indicated: {} bytes", total_message_size);
 
-        // Basic validation: ensure the message is at least as long as the header
-        if total_message_size < HEADER_LEN as u32 {
-            println!("Invalid message size {} < {}, breaking connection", total_message_size, HEADER_LEN);
+        // Basic validation: ensure the message is at least as long as the header (minus the 4 bytes we already read)
+        if total_message_size < (HEADER_LEN - MESSAGE_SIZE_LEN) as u32 {
+            println!("Invalid message size {} < {}, breaking connection", total_message_size, HEADER_LEN - MESSAGE_SIZE_LEN);
             break;
         }
 
         //Now, read the rest of the message (api_key, api_version, correlation_id, and if any a body)
-        //I already read the MESSAGE_SIZE_LEN so it will be `total_message_size - MESSAGE_SIZE_LEN`
-        //more bytes
-        let remaining_bytes = total_message_size as usize - MESSAGE_SIZE_LEN;
+        //The total_message_size includes everything after the initial 4 bytes, so we read exactly that amount
+        let remaining_bytes = total_message_size as usize;
         let mut full_request_buffer = vec![0; remaining_bytes];
         
         if let Err(e) = stream.read_exact(&mut full_request_buffer) {
