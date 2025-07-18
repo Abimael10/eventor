@@ -65,18 +65,43 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to get 4 bytes for correlation ID."))?
     );
 
+    //Extract the API version
+    let api_version_offset = API_KEY_LEN; //Skip API key, those are 2 bytes
+    let api_version_bytes = &full_request_buffer[
+        api_version_offset
+        ..
+        api_version_offset + API_VERSION_LEN
+    ];
+
+    let api_version = u16::from_be_bytes(
+        api_version_bytes
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to get 2 bytes for API version."))?
+    );
+
+    //Validate API version
+    let error_code: u16 = if api_version <= 4 { 0 } else { 35 };
+
     println!("Extracted Correlation ID (u32): {}", correlation_id);
     println!("Extracted Correlation ID (bytes): {:?}", correlation_id_bytes_slice);
 
     //Build the response
-    //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request]
-    let response_message_size: u32 = 0;
+    //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
+    //api_version_response_bytes]
+    let response_message_size: u32 = 6; //correlation ID (4) + error code (2)
     let response_message_size_bytes = response_message_size.to_be_bytes();
     let correlation_id_response_bytes = correlation_id.to_be_bytes();
+    let error_code_bytes = error_code.to_be_bytes();
 
-    let mut response = Vec::with_capacity(MESSAGE_SIZE_LEN + CORRELATION_ID_LEN);
+    let mut response = Vec::with_capacity(MESSAGE_SIZE_LEN + CORRELATION_ID_LEN + 2); //+2 bytes
+                                                                                      //are the
+                                                                                      //error code
+                                                                                      //bytes, hard
+                                                                                      //coded for
+                                                                                      //simplicity
     response.extend_from_slice(&response_message_size_bytes);
     response.extend_from_slice(&correlation_id_response_bytes);
+    response.extend_from_slice(&error_code_bytes);
 
     println!("Sending response: {:?}", response);
 
