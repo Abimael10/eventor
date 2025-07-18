@@ -16,121 +16,142 @@ const HEADER_LEN: usize = MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN + COR
 fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     println!("Handling connection from: {}", stream.peer_addr()?);
 
-    //Initial buffer to read just the message_size
-    let mut initial_bytes = vec![0; MESSAGE_SIZE_LEN];
+    loop {
+        //Initial buffer to read just the message_size
+        let mut initial_bytes = vec![0; MESSAGE_SIZE_LEN];
 
-    stream.read_exact(&mut initial_bytes)?;
-    let total_message_size = u32::from_be_bytes(
-        initial_bytes.as_slice()
-        .try_into()
-        .unwrap_or_else(|_| [0; 4])
-    );
-    println!("Total message size indicated: {} bytes", total_message_size);
+        let total_message_size = match stream.read_exact(&mut initial_bytes) {
+            Ok(()) => {
+                u32::from_be_bytes(
+                    initial_bytes.as_slice()
+                        .try_into()
+                        .unwrap_or_else(|_| [0; 4])
+                )
+            }
+            Err(e) => {
+                println!("Client disconnected: {}", e);
+                break;
+            }
+        };
+        println!("Total message size indicated: {} bytes", total_message_size);
 
-    // Basic validation: ensure the message is at least as long as the header
-    if total_message_size < HEADER_LEN as u32 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Message size {} is smaller than minimum header size {}", total_message_size, HEADER_LEN)
-        ));
+        // Basic validation: ensure the message is at least as long as the header
+        if total_message_size < HEADER_LEN as u32 {
+            println!("Invalid message size {} < {}, breaking connection", total_message_size, HEADER_LEN);
+            break;
+        }
+
+        //Now, read the rest of the message (api_key, api_version, correlation_id, and if any a body)
+        //I already read the MESSAGE_SIZE_LEN so it will be `total_message_size - MESSAGE_SIZE_LEN`
+        //more bytes
+        let remaining_bytes = total_message_size as usize - MESSAGE_SIZE_LEN;
+        let mut full_request_buffer = vec![0; remaining_bytes];
+        
+        if let Err(e) = stream.read_exact(&mut full_request_buffer) {
+            println!("Error reading request body: {}", e);
+            break;
+        }
+
+        let correlation_id_offset_in_remaining = API_KEY_LEN + API_VERSION_LEN;
+
+        // Verify bounds before slicing to prevent panic
+        if remaining_bytes < correlation_id_offset_in_remaining + CORRELATION_ID_LEN {
+            println!("Message too short to contain correlation ID, breaking connection");
+            break;
+        }
+
+        //Extract the correlation ID from bytes 8-11
+        let correlation_id_bytes_slice = &full_request_buffer[
+            correlation_id_offset_in_remaining
+                ..
+                correlation_id_offset_in_remaining + CORRELATION_ID_LEN
+        ];
+
+        let correlation_id = match correlation_id_bytes_slice.try_into() {
+            Ok(bytes) => u32::from_be_bytes(bytes),
+            Err(_) => {
+                println!("Failed to get 4 bytes for correlation ID, breaking connection");
+                break;
+            }
+        };
+
+        //Extract the API version
+        let api_version_offset = API_KEY_LEN; //Skip API key, those are 2 bytes
+        let api_version_bytes = &full_request_buffer[
+            api_version_offset
+                ..
+                api_version_offset + API_VERSION_LEN
+        ];
+
+        let api_version = match api_version_bytes.try_into() {
+            Ok(bytes) => u16::from_be_bytes(bytes),
+            Err(_) => {
+                println!("Failed to get 2 bytes for API version, breaking connection");
+                break;
+            }
+        };
+
+        //Validate API version
+        let error_code: u16 = if api_version <= 4 { 0 } else { 35 };
+
+        println!("Extracted Correlation ID (u32): {}", correlation_id);
+        println!("Extracted Correlation ID (bytes): {:?}", correlation_id_bytes_slice);
+
+        //Build the response
+        //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
+        //error_code][4 bytes: api_count][2 bytes: api_key][2 bytes: min_version][2 bytes:
+        //max_version][1 bytes: tagged_fields]
+        let response_message_size: u32 = 19; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count compact array (1) + api key (2) + api minimal (2) + api max (2) + api_tagged_fields (1) + throttle_time_ms (4) + response_tagged_fields (1) -- So far, after the message size bytes which are 4, we send an extra 19 bytes making a total of 23 bytes for the response.
+        let response_message_size_bytes = response_message_size.to_be_bytes();
+        let correlation_id_response_bytes = correlation_id.to_be_bytes();
+        let error_code_bytes = error_code.to_be_bytes();
+
+        //Handle API versions request
+        //The API version requires to have a compact array containing the required API count which is
+        //only for now. After looking it up remember the compact array format works like this: [1 API +
+        //1] encoded as varint 0x02 that will leave the digit in u8 type to be equal to 2.
+        let api_count_array: u8 = 2;
+        let api_key: u16 = 18; //APIversions
+        let min_version: u16 = 0; //minimal version since I only work with version 0 through 4
+        let max_version: u16 = 4;
+        let api_tagged_fields: u8 = 0;
+        let throttle_time_ms: u32 = 0;
+        let response_tagged_fields: u8 = 0;
+
+        let mut response = Vec::new();
+        response.extend_from_slice(&response_message_size_bytes);
+        response.extend_from_slice(&correlation_id_response_bytes);
+        response.extend_from_slice(&error_code_bytes);
+        //Addin API versions info to the response
+        response.extend_from_slice(&[api_count_array]); //This is already converted so we add it as a
+                                                        //borrowed format of array.
+        response.extend_from_slice(&api_key.to_be_bytes());
+        response.extend_from_slice(&min_version.to_be_bytes());
+        response.extend_from_slice(&max_version.to_be_bytes());
+        response.extend_from_slice(&[api_tagged_fields]);
+        response.extend_from_slice(&throttle_time_ms.to_be_bytes());
+        response.extend_from_slice(&[response_tagged_fields]);
+
+        println!("Sending response: {:?}", response);
+
+        //Send the response back to the client
+        if let Err(e) = stream.write_all(&response) {
+            println!("Error writing response: {}", e);
+            break;
+        }
+
+        //Just to pass the fucking test, those idiots set a rule up their fucking asshole, 5:08 AM
+        //dealing with this shit
+        if let Err(e) = stream.flush() {
+            println!("Error flushing stream: {}", e);
+            break;
+        }
+        println!("Response sent.");
+
+        //stream.shutdown(Shutdown::Both)?; // Shutdown both read and write, commented out since now we
+        //will handle multiple requests in the client.
+
     }
-
-    //Now, read the rest of the message (api_key, api_version, correlation_id, and if any a body)
-    //I already read the MESSAGE_SIZE_LEN so it will be `total_message_size - MESSAGE_SIZE_LEN`
-    //more bytes
-    let remaining_bytes = total_message_size as usize - MESSAGE_SIZE_LEN;
-    let mut full_request_buffer = vec![0; remaining_bytes];
-    stream.read_exact(&mut full_request_buffer)?;
-
-    let correlation_id_offset_in_remaining = API_KEY_LEN + API_VERSION_LEN;
-
-    // Verify bounds before slicing to prevent panic
-    if remaining_bytes < correlation_id_offset_in_remaining + CORRELATION_ID_LEN {
-         return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Received message too short to contain full correlation ID"
-        ));
-    }
-
-    //Extract the correlation ID from bytes 8-11
-    let correlation_id_bytes_slice = &full_request_buffer[
-        correlation_id_offset_in_remaining
-        ..
-        correlation_id_offset_in_remaining + CORRELATION_ID_LEN
-    ];
-
-    let correlation_id = u32::from_be_bytes(
-        correlation_id_bytes_slice
-            .try_into()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to get 4 bytes for correlation ID."))?
-    );
-
-    //Extract the API version
-    let api_version_offset = API_KEY_LEN; //Skip API key, those are 2 bytes
-    let api_version_bytes = &full_request_buffer[
-        api_version_offset
-        ..
-        api_version_offset + API_VERSION_LEN
-    ];
-
-    let api_version = u16::from_be_bytes(
-        api_version_bytes
-            .try_into()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to get 2 bytes for API version."))?
-    );
-
-    //Validate API version
-    let error_code: u16 = if api_version <= 4 { 0 } else { 35 };
-
-    println!("Extracted Correlation ID (u32): {}", correlation_id);
-    println!("Extracted Correlation ID (bytes): {:?}", correlation_id_bytes_slice);
-
-    //Build the response
-    //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
-    //error_code][4 bytes: api_count][2 bytes: api_key][2 bytes: min_version][2 bytes:
-    //max_version][1 bytes: tagged_fields]
-    let response_message_size: u32 = 19; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count compact array (1) + api key (2) + api minimal (2) + api max (2) + api_tagged_fields (1) + throttle_time_ms (4) + response_tagged_fields (1) -- So far, after the message size bytes which are 4, we send an extra 19 bytes making a total of 23 bytes for the response.
-    let response_message_size_bytes = response_message_size.to_be_bytes();
-    let correlation_id_response_bytes = correlation_id.to_be_bytes();
-    let error_code_bytes = error_code.to_be_bytes();
-
-    //Handle API versions request
-    //The API version requires to have a compact array containing the required API count which is
-    //only for now. After looking it up remember the compact array format works like this: [1 API +
-    //1] encoded as varint 0x02 that will leave the digit in u8 type to be equal to 2.
-    let api_count_array: u8 = 2;
-    let api_key: u16 = 18; //APIversions
-    let min_version: u16 = 0; //minimal version since I only work with version 0 through 4
-    let max_version: u16 = 4;
-    let api_tagged_fields: u8 = 0;
-    let throttle_time_ms: u32 = 0;
-    let response_tagged_fields: u8 = 0;
-
-    let mut response = Vec::new();
-    response.extend_from_slice(&response_message_size_bytes);
-    response.extend_from_slice(&correlation_id_response_bytes);
-    response.extend_from_slice(&error_code_bytes);
-    //Addin API versions info to the response
-    response.extend_from_slice(&[api_count_array]); //This is already converted so we add it as a
-                                                    //borrowed format of array.
-    response.extend_from_slice(&api_key.to_be_bytes());
-    response.extend_from_slice(&min_version.to_be_bytes());
-    response.extend_from_slice(&max_version.to_be_bytes());
-    response.extend_from_slice(&[api_tagged_fields]);
-    response.extend_from_slice(&throttle_time_ms.to_be_bytes());
-    response.extend_from_slice(&[response_tagged_fields]);
-
-    println!("Sending response: {:?}", response);
-
-    //Send the response back to the client
-    stream.write_all(&response)?;
-
-    //Just to pass the fucking test, those idiots set a rule up their fucking asshole, 5:08 AM
-    //dealing with this shit
-    stream.flush()?;
-    println!("Response sent.");
-
-    stream.shutdown(Shutdown::Both)?; // Shutdown both read and write
     Ok(())
 }
 
@@ -138,7 +159,7 @@ fn main() -> io::Result<()> {
 
     let listener = TcpListener::bind("127.0.0.1:9092").unwrap();
     println!("Server listening on: {}", listener.local_addr()?);
-    
+
     //Accept incoming connections
     for stream in listener.incoming() {
         match stream {
