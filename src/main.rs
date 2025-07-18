@@ -49,8 +49,11 @@ fn parse_topic_name(request_buffer: &[u8]) -> String {
 fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &str) -> Vec<u8> {
     let mut response = Vec::new();
     
-    // Response structure according to Kafka protocol:
-    // [message_size][correlation_id][throttle_time_ms][topic_count][topic_name][topic_id][error_code][partitions][tagged_fields]
+    // Response structure according to Kafka protocol v0:
+    // [message_size][correlation_id][throttle_time_ms][topics][next_cursor][tagged_fields]
+    // 
+    // Topic structure:
+    // [error_code][name][topic_id][is_internal][partitions][topic_authorized_operations][tagged_fields]
     
     let correlation_id_bytes = correlation_id.to_be_bytes();
     let throttle_time_ms: u32 = 0;
@@ -58,24 +61,36 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     let topic_name_len: u8 = (topic_name.len() + 1) as u8; // compact string: len + 1
     let topic_id = [0u8; 16]; // 16 zero bytes for null UUID
     let error_code: u16 = 3; // UNKNOWN_TOPIC_OR_PARTITION
+    let is_internal: u8 = 0; // false
     let partitions_count: u8 = 1; // compact array: 0 partitions + 1 = 1
-    let tagged_fields: u8 = 0;
+    let topic_authorized_operations: u32 = 0; // No operations
+    let topic_tagged_fields: u8 = 0;
+    let next_cursor: u8 = 0; // null next_cursor
+    let response_tagged_fields: u8 = 0;
     
     // Calculate message size: everything after the message_size field
-    let message_size = 4 + 4 + 1 + 1 + topic_name.len() + 16 + 2 + 1 + 1;
-    // correlation_id(4) + throttle_time(4) + topic_count(1) + topic_name_len(1) + topic_name + topic_id(16) + error_code(2) + partitions(1) + tagged_fields(1)
+    let message_size = 4 + 4 + 1 + (2 + 1 + topic_name.len() + 16 + 1 + 1 + 4 + 1) + 1 + 1;
+    // correlation_id(4) + throttle_time(4) + topic_count(1) + [topic: error_code(2) + topic_name_len(1) + topic_name + topic_id(16) + is_internal(1) + partitions(1) + topic_authorized_operations(4) + topic_tagged_fields(1)] + next_cursor(1) + response_tagged_fields(1)
     
     // Build response
     response.extend_from_slice(&(message_size as u32).to_be_bytes());
     response.extend_from_slice(&correlation_id_bytes);
     response.extend_from_slice(&throttle_time_ms.to_be_bytes());
     response.extend_from_slice(&[topic_count]);
+    
+    // Topic data
+    response.extend_from_slice(&error_code.to_be_bytes());
     response.extend_from_slice(&[topic_name_len]);
     response.extend_from_slice(topic_name.as_bytes());
     response.extend_from_slice(&topic_id);
-    response.extend_from_slice(&error_code.to_be_bytes());
+    response.extend_from_slice(&[is_internal]);
     response.extend_from_slice(&[partitions_count]);
-    response.extend_from_slice(&[tagged_fields]);
+    response.extend_from_slice(&topic_authorized_operations.to_be_bytes());
+    response.extend_from_slice(&[topic_tagged_fields]);
+    
+    // Next cursor and response tagged fields
+    response.extend_from_slice(&[next_cursor]);
+    response.extend_from_slice(&[response_tagged_fields]);
     
     response
 }
