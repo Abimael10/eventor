@@ -59,13 +59,14 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     let throttle_time_ms: u32 = 0;
     let topic_count: u8 = 2; // compact array: 1 topic + 1 = 2
     let topic_name_len: u8 = (topic_name.len() + 1) as u8; // compact string: len + 1
+    println!("Building response for topic: '{}', length: {}", topic_name, topic_name.len());
     let topic_id = [0u8; 16]; // 16 zero bytes for null UUID
     let error_code: u16 = 3; // UNKNOWN_TOPIC_OR_PARTITION
     let is_internal: u8 = 0; // false
     let partitions_count: u8 = 1; // compact array: 0 partitions + 1 = 1
     let topic_authorized_operations: u32 = 0; // No operations
     let topic_tagged_fields: u8 = 0;
-    let next_cursor: u8 = 0; // null next_cursor (encoded as 0 for nullable)
+    let next_cursor_null: u8 = 0; // null next_cursor (encoded as 0 for nullable complex type)
     let response_tagged_fields: u8 = 0;
     
     // Calculate message size: everything after the message_size field
@@ -91,7 +92,7 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     response.extend_from_slice(&[topic_tagged_fields]);
     
     // Next cursor (null) and response tagged fields
-    response.extend_from_slice(&[next_cursor]);
+    response.extend_from_slice(&[next_cursor_null]);
     response.extend_from_slice(&[response_tagged_fields]);
     
     response
