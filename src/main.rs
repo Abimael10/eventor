@@ -66,7 +66,7 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     let partitions_count: u8 = 1; // compact array: 0 partitions + 1 = 1
     let topic_authorized_operations: u32 = 0; // No operations
     let topic_tagged_fields: u8 = 0;
-    let next_cursor_null: u8 = 0; // null next_cursor (encoded as 0 for nullable complex type)
+    let next_cursor_null: u8 = 0; // null next_cursor (encoded as 0 for flexible version nullable)
     let response_tagged_fields: u8 = 0;
     
     // Calculate message size: everything after the message_size field
