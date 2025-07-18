@@ -69,12 +69,14 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     let response_tagged_fields: u8 = 0;
     
     // Calculate message size: everything after the message_size field
-    let message_size = 4 + 4 + 1 + (2 + 1 + topic_name.len() + 16 + 1 + 1 + 4 + 1) + 1 + 1;
-    // correlation_id(4) + throttle_time(4) + topic_count(1) + [topic: error_code(2) + topic_name_len(1) + topic_name + topic_id(16) + is_internal(1) + partitions(1) + topic_authorized_operations(4) + topic_tagged_fields(1)] + next_cursor(1) + response_tagged_fields(1)
+    // Response Header v1: correlation_id(4) + header_tag_buffer(1) + throttle_time(4) + topic_count(1) + [topic: error_code(2) + topic_name_len(1) + topic_name + topic_id(16) + is_internal(1) + partitions(1) + topic_authorized_operations(4) + topic_tagged_fields(1)] + next_cursor(1) + response_tagged_fields(1)
+    let message_size = 4 + 1 + 4 + 1 + (2 + 1 + topic_name.len() + 16 + 1 + 1 + 4 + 1) + 1 + 1;
+    let header_tag_buffer: u8 = 0; // TAG_BUFFER for Response Header v1
     
     // Build response
     response.extend_from_slice(&(message_size as u32).to_be_bytes());
     response.extend_from_slice(&correlation_id_bytes);
+    response.extend_from_slice(&[header_tag_buffer]); // Response Header v1 TAG_BUFFER
     response.extend_from_slice(&throttle_time_ms.to_be_bytes());
     response.extend_from_slice(&[topic_count]);
     
