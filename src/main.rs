@@ -11,6 +11,125 @@ const CORRELATION_ID_LEN: usize = 4;
 
 const HEADER_LEN: usize = MESSAGE_SIZE_LEN + API_KEY_LEN + API_VERSION_LEN + CORRELATION_ID_LEN; // 4 + 2 + 2 + 4 = 12 bytes
 
+/// Parses topic name from DescribeTopicPartitions request
+fn parse_topic_name(request_buffer: &[u8]) -> String {
+    // After api_key(2) + api_version(2) + correlation_id(4) = 8 bytes
+    // Then we have: topic_count(1) + topic_name_length(varint) + topic_name + other_fields
+    let header_offset = API_KEY_LEN + API_VERSION_LEN + CORRELATION_ID_LEN; // 8 bytes
+    
+    if request_buffer.len() < header_offset + 2 {
+        return String::new();
+    }
+    
+    let topic_count_offset = header_offset;
+    let topic_name_len_offset = topic_count_offset + 1; // Skip compact array count
+    
+    if request_buffer.len() <= topic_name_len_offset {
+        return String::new();
+    }
+    
+    // Compact string encoding: length + 1, then string bytes
+    let topic_name_len = request_buffer[topic_name_len_offset] as usize;
+    if topic_name_len == 0 {
+        return String::new();
+    }
+    
+    let actual_topic_name_len = topic_name_len - 1; // Compact string: stored_len - 1 = actual_len
+    let topic_name_start = topic_name_len_offset + 1;
+    let topic_name_end = topic_name_start + actual_topic_name_len;
+    
+    if request_buffer.len() < topic_name_end {
+        return String::new();
+    }
+    
+    String::from_utf8_lossy(&request_buffer[topic_name_start..topic_name_end]).to_string()
+}
+
+/// Builds DescribeTopicPartitions response for unknown topic
+fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &str) -> Vec<u8> {
+    let mut response = Vec::new();
+    
+    // Response structure according to Kafka protocol:
+    // [message_size][correlation_id][throttle_time_ms][topic_count][topic_name][topic_id][error_code][partitions][tagged_fields]
+    
+    let correlation_id_bytes = correlation_id.to_be_bytes();
+    let throttle_time_ms: u32 = 0;
+    let topic_count: u8 = 2; // compact array: 1 topic + 1 = 2
+    let topic_name_len: u8 = (topic_name.len() + 1) as u8; // compact string: len + 1
+    let topic_id = [0u8; 16]; // 16 zero bytes for null UUID
+    let error_code: u16 = 3; // UNKNOWN_TOPIC_OR_PARTITION
+    let partitions_count: u8 = 1; // compact array: 0 partitions + 1 = 1
+    let tagged_fields: u8 = 0;
+    
+    // Calculate message size: everything after the message_size field
+    let message_size = 4 + 4 + 1 + 1 + topic_name.len() + 16 + 2 + 1 + 1;
+    // correlation_id(4) + throttle_time(4) + topic_count(1) + topic_name_len(1) + topic_name + topic_id(16) + error_code(2) + partitions(1) + tagged_fields(1)
+    
+    // Build response
+    response.extend_from_slice(&(message_size as u32).to_be_bytes());
+    response.extend_from_slice(&correlation_id_bytes);
+    response.extend_from_slice(&throttle_time_ms.to_be_bytes());
+    response.extend_from_slice(&[topic_count]);
+    response.extend_from_slice(&[topic_name_len]);
+    response.extend_from_slice(topic_name.as_bytes());
+    response.extend_from_slice(&topic_id);
+    response.extend_from_slice(&error_code.to_be_bytes());
+    response.extend_from_slice(&[partitions_count]);
+    response.extend_from_slice(&[tagged_fields]);
+    
+    response
+}
+
+/// Builds APIVersions response
+fn build_api_versions_response(correlation_id: u32, api_version: u16) -> Vec<u8> {
+    let error_code: u16 = if api_version <= 4 { 0 } else { 35 };
+    
+    let response_message_size: u32 = 26;
+    let response_message_size_bytes = response_message_size.to_be_bytes();
+    let correlation_id_response_bytes = correlation_id.to_be_bytes();
+    let error_code_bytes = error_code.to_be_bytes();
+
+    let api_count_array: u8 = 3; // 2 APIs + 1 = 3
+    
+    // First API: APIVersions
+    let api_key_1: u16 = 18;
+    let min_version_1: u16 = 0;
+    let max_version_1: u16 = 4;
+    let api_tagged_fields_1: u8 = 0;
+    
+    // Second API: DescribeTopicPartitions
+    let api_key_2: u16 = 75;
+    let min_version_2: u16 = 0;
+    let max_version_2: u16 = 0;
+    let api_tagged_fields_2: u8 = 0;
+    
+    let throttle_time_ms: u32 = 0;
+    let response_tagged_fields: u8 = 0;
+
+    let mut response = Vec::new();
+    response.extend_from_slice(&response_message_size_bytes);
+    response.extend_from_slice(&correlation_id_response_bytes);
+    response.extend_from_slice(&error_code_bytes);
+    response.extend_from_slice(&[api_count_array]);
+    
+    // First API: APIVersions
+    response.extend_from_slice(&api_key_1.to_be_bytes());
+    response.extend_from_slice(&min_version_1.to_be_bytes());
+    response.extend_from_slice(&max_version_1.to_be_bytes());
+    response.extend_from_slice(&[api_tagged_fields_1]);
+    
+    // Second API: DescribeTopicPartitions
+    response.extend_from_slice(&api_key_2.to_be_bytes());
+    response.extend_from_slice(&min_version_2.to_be_bytes());
+    response.extend_from_slice(&max_version_2.to_be_bytes());
+    response.extend_from_slice(&[api_tagged_fields_2]);
+    
+    response.extend_from_slice(&throttle_time_ms.to_be_bytes());
+    response.extend_from_slice(&[response_tagged_fields]);
+    
+    response
+}
+
 /// Handles a single incoming TCP connection.
 /// Reads the request, extracts the correlation ID, and sends back the response.
 fn handle_client(mut stream: TcpStream) -> io::Result<()> {
@@ -74,6 +193,16 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
             }
         };
 
+        //Extract the API key
+        let api_key_bytes = &full_request_buffer[0..API_KEY_LEN];
+        let api_key = match api_key_bytes.try_into() {
+            Ok(bytes) => u16::from_be_bytes(bytes),
+            Err(_) => {
+                println!("Failed to get 2 bytes for API key, breaking connection");
+                break;
+            }
+        };
+
         //Extract the API version
         let api_version_offset = API_KEY_LEN; //Skip API key, those are 2 bytes
         let api_version_bytes = &full_request_buffer[
@@ -90,66 +219,29 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
             }
         };
 
-        //Validate API version
-        let error_code: u16 = if api_version <= 4 { 0 } else { 35 };
-
         println!("Extracted Correlation ID (u32): {}", correlation_id);
         println!("Extracted Correlation ID (bytes): {:?}", correlation_id_bytes_slice);
+        println!("Extracted API Key: {}", api_key);
+        println!("Extracted API Version: {}", api_version);
 
-        //Build the response
-        //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
-        //error_code][4 bytes: api_count][2 bytes: api_key][2 bytes: min_version][2 bytes:
-        //max_version][1 bytes: tagged_fields] ---- Deprecated this format but will keep in case I
-        //need something more simple later on ----
-        // With 2 APIs: correlation_id(4) + error_code(2) + api_count(1) + api1(7) + api2(7) + throttle_time(4) + tagged_fields(1) = 26 bytes
-        let response_message_size: u32 = 26;
-        let response_message_size_bytes = response_message_size.to_be_bytes();
-        let correlation_id_response_bytes = correlation_id.to_be_bytes();
-        let error_code_bytes = error_code.to_be_bytes();
-
-        //Handle API versions request
-        //The API version requires to have a compact array containing the required API count which is
-        //2 APIs now. Compact array format works like this: [actual count + 1] encoded as varint
-        //For 2 APIs: 2 + 1 = 3, encoded as varint 0x03
-        let api_count_array: u8 = 3;
-        
-        // First API: APIVersions
-        let api_key_1: u16 = 18; //APIversions
-        let min_version_1: u16 = 0; //minimal version since I only work with version 0 through 4
-        let max_version_1: u16 = 4;
-        let api_tagged_fields_1: u8 = 0;
-        
-        // Second API: DescribeTopicPartitions ..
-        let api_key_2: u16 = 75; //DescribeTopicPartitions
-        let min_version_2: u16 = 0;
-        let max_version_2: u16 = 0;
-        let api_tagged_fields_2: u8 = 0;
-        
-        let throttle_time_ms: u32 = 0;
-        let response_tagged_fields: u8 = 0;
-
-        let mut response = Vec::new();
-        response.extend_from_slice(&response_message_size_bytes);
-        response.extend_from_slice(&correlation_id_response_bytes);
-        response.extend_from_slice(&error_code_bytes);
-        //Adding API versions info to the response
-        response.extend_from_slice(&[api_count_array]); //This is already converted so we add it as a
-                                                        //borrowed format of array.
-        
-        // First API: APIVersions
-        response.extend_from_slice(&api_key_1.to_be_bytes());
-        response.extend_from_slice(&min_version_1.to_be_bytes());
-        response.extend_from_slice(&max_version_1.to_be_bytes());
-        response.extend_from_slice(&[api_tagged_fields_1]);
-        
-        // Second API: DescribeTopicPartitions
-        response.extend_from_slice(&api_key_2.to_be_bytes());
-        response.extend_from_slice(&min_version_2.to_be_bytes());
-        response.extend_from_slice(&max_version_2.to_be_bytes());
-        response.extend_from_slice(&[api_tagged_fields_2]);
-        
-        response.extend_from_slice(&throttle_time_ms.to_be_bytes());
-        response.extend_from_slice(&[response_tagged_fields]);
+        // Build response based on API key
+        let response = if api_key == 18 {
+            // APIVersions request
+            println!("Handling APIVersions request");
+            build_api_versions_response(correlation_id, api_version)
+        } else if api_key == 75 {
+            // DescribeTopicPartitions request
+            println!("Handling DescribeTopicPartitions request");
+            let topic_name = parse_topic_name(&full_request_buffer);
+            println!("Parsed topic name: '{}'", topic_name);
+            build_describe_topic_partitions_response(correlation_id, &topic_name)
+        } else {
+            // Unknown API key - return error
+            println!("Unknown API key: {}", api_key);
+            vec![0, 0, 0, 8, 
+                 (correlation_id >> 24) as u8, (correlation_id >> 16) as u8, (correlation_id >> 8) as u8, correlation_id as u8,
+                 0, 35, 0, 0] // Error code 35 = UNSUPPORTED_VERSION
+        };
 
         println!("Sending response: {:?}", response);
 
