@@ -99,8 +99,9 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         //Build the response
         //Response format: [4 bytes: message_size][4 bytes: correlation_id_from_request][2 bytes:
         //error_code][4 bytes: api_count][2 bytes: api_key][2 bytes: min_version][2 bytes:
-        //max_version][1 bytes: tagged_fields]
-        let response_message_size: u32 = 19; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count compact array (1) + api key (2) + api minimal (2) + api max (2) + api_tagged_fields (1) + throttle_time_ms (4) + response_tagged_fields (1) -- So far, after the message size bytes which are 4, we send an extra 19 bytes making a total of 23 bytes for the response.
+        //max_version][1 bytes: tagged_fields] ---- Deprecated this format but will keep in case I
+        //need something more simple later on ----
+        let response_message_size: u32 = 26; // AFTER THE MESSAGE SIZE: correlation ID (4) + error code (2) + api count compact array (1) + [API1: api key (2) + api minimal (2) + api max (2) + api_tagged_fields (1)] + [API2: api key (2) + api minimal (2) + api max (2) + api_tagged_fields (1)] + throttle_time_ms (4) + response_tagged_fields (1) = 4+2+1+7+7+4+1 = 26 bytes
         let response_message_size_bytes = response_message_size.to_be_bytes();
         let correlation_id_response_bytes = correlation_id.to_be_bytes();
         let error_code_bytes = error_code.to_be_bytes();
@@ -110,10 +111,19 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         //only for now. After looking it up remember the compact array format works like this: [1 API +
         //1] encoded as varint 0x02 that will leave the digit in u8 type to be equal to 2.
         let api_count_array: u8 = 2;
-        let api_key: u16 = 18; //APIversions
-        let min_version: u16 = 0; //minimal version since I only work with version 0 through 4
-        let max_version: u16 = 4;
-        let api_tagged_fields: u8 = 0;
+        
+        // First API: APIVersions
+        let api_key_1: u16 = 18; //APIversions
+        let min_version_1: u16 = 0; //minimal version since I only work with version 0 through 4
+        let max_version_1: u16 = 4;
+        let api_tagged_fields_1: u8 = 0;
+        
+        // Second API: DescribeTopicPartitions
+        let api_key_2: u16 = 75; //DescribeTopicPartitions
+        let min_version_2: u16 = 0;
+        let max_version_2: u16 = 0;
+        let api_tagged_fields_2: u8 = 0;
+        
         let throttle_time_ms: u32 = 0;
         let response_tagged_fields: u8 = 0;
 
@@ -121,13 +131,22 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         response.extend_from_slice(&response_message_size_bytes);
         response.extend_from_slice(&correlation_id_response_bytes);
         response.extend_from_slice(&error_code_bytes);
-        //Addin API versions info to the response
+        //Adding API versions info to the response
         response.extend_from_slice(&[api_count_array]); //This is already converted so we add it as a
                                                         //borrowed format of array.
-        response.extend_from_slice(&api_key.to_be_bytes());
-        response.extend_from_slice(&min_version.to_be_bytes());
-        response.extend_from_slice(&max_version.to_be_bytes());
-        response.extend_from_slice(&[api_tagged_fields]);
+        
+        // First API: APIVersions
+        response.extend_from_slice(&api_key_1.to_be_bytes());
+        response.extend_from_slice(&min_version_1.to_be_bytes());
+        response.extend_from_slice(&max_version_1.to_be_bytes());
+        response.extend_from_slice(&[api_tagged_fields_1]);
+        
+        // Second API: DescribeTopicPartitions
+        response.extend_from_slice(&api_key_2.to_be_bytes());
+        response.extend_from_slice(&min_version_2.to_be_bytes());
+        response.extend_from_slice(&max_version_2.to_be_bytes());
+        response.extend_from_slice(&[api_tagged_fields_2]);
+        
         response.extend_from_slice(&throttle_time_ms.to_be_bytes());
         response.extend_from_slice(&[response_tagged_fields]);
 
@@ -149,7 +168,6 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
         //stream.shutdown(Shutdown::Both)?; // Shutdown both read and write, commented out since now we
         //will handle multiple requests in the client.
-
     }
     Ok(())
 }
