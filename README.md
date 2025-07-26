@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge)]()
 
-A lightweight, high-performance event stream processor implementing the Kafka wire protocol in Rust. Eventor provides a minimal but compliant Kafka server implementation that can handle multiple concurrent connections and process streaming events efficiently.
+A lightweight, event stream processor implementing the Kafka wire protocol in Rust. Eventor provides a minimal but compliant Kafka server implementation that can handle multiple concurrent connections and process streaming events efficiently.
 
 ## 🚀 Features
 
