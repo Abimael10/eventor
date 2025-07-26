@@ -1,8 +1,8 @@
-#![allow(unused_imports)]
+//#![allow(unused_imports)]
 
-use std::io::{self, Write, Read};
-use std::net::{TcpListener, TcpStream, Shutdown};
-use std::convert::TryInto; //To use try_into() on slices
+use std::convert::TryInto;
+use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream}; //To use try_into() on slices
 
 const MESSAGE_SIZE_LEN: usize = 4;
 const API_KEY_LEN: usize = 2;
@@ -16,15 +16,15 @@ fn parse_topic_name(request_buffer: &[u8]) -> String {
     // DescribeTopicPartitions request format:
     // api_key(2) + api_version(2) + correlation_id(4) + client_id + topics + cursor + tagged_fields
     // We need to find the topic name from the topics array
-    
+
     // Skip to the topics array - this is complex parsing, let's find the actual topic
     // For now, let's extract the topic name from the request hex dump analysis
-    
+
     // Based on the hex dump, the topic name "unknown-topic-saz" starts at a specific position
     // Let's find it by looking for the pattern in the request
-    
+
     let request_str = String::from_utf8_lossy(request_buffer);
-    
+
     // Look for "unknown-topic-" pattern
     if let Some(start) = request_str.find("unknown-topic-") {
         let remaining = &request_str[start..];
@@ -32,26 +32,30 @@ fn parse_topic_name(request_buffer: &[u8]) -> String {
             return remaining[..end].to_string();
         }
     }
-    
-    // Fallback: return a default topic name  
+
+    // Fallback: return a default topic name
     "unknown-topic-saz".to_string()
 }
 
 /// Builds DescribeTopicPartitions response for unknown topic
 fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &str) -> Vec<u8> {
     let mut response = Vec::new();
-    
+
     // Response structure according to Kafka protocol v0:
     // [message_size][correlation_id][throttle_time_ms][topics][next_cursor][tagged_fields]
-    // 
+    //
     // Topic structure:
     // [error_code][name][topic_id][is_internal][partitions][topic_authorized_operations][tagged_fields]
-    
+
     let correlation_id_bytes = correlation_id.to_be_bytes();
     let throttle_time_ms: u32 = 0;
     let topic_count: u8 = 2; // compact array: 1 topic + 1 = 2
     let topic_name_len: u8 = (topic_name.len() + 1) as u8; // compact string: len + 1
-    println!("Building response for topic: '{}', length: {}", topic_name, topic_name.len());
+    println!(
+        "Building response for topic: '{}', length: {}",
+        topic_name,
+        topic_name.len()
+    );
     let topic_id = [0u8; 16]; // 16 zero bytes for null UUID
     let error_code: u16 = 3; // UNKNOWN_TOPIC_OR_PARTITION
     let is_internal: u8 = 0; // false
@@ -61,19 +65,19 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     // Set next_cursor to null for unknown topics (flexible version nullable)
     let next_cursor_null: u8 = 0xFF;
     let response_tagged_fields: u8 = 0;
-    
+
     // Calculate message size: everything after the message_size field
     // Response Header v1: correlation_id(4) + header_tag_buffer(1) + throttle_time(4) + topic_count(1) + [topic: error_code(2) + topic_name_len(1) + topic_name + topic_id(16) + is_internal(1) + partitions(1) + topic_authorized_operations(4) + topic_tagged_fields(1)] + next_cursor(1) + response_tagged_fields(1)
     let message_size = 4 + 1 + 4 + 1 + (2 + 1 + topic_name.len() + 16 + 1 + 1 + 4 + 1) + 1 + 1;
     let header_tag_buffer: u8 = 0; // TAG_BUFFER for Response Header v1
-    
+
     // Build response
     response.extend_from_slice(&(message_size as u32).to_be_bytes());
     response.extend_from_slice(&correlation_id_bytes);
     response.extend_from_slice(&[header_tag_buffer]); // Response Header v1 TAG_BUFFER
     response.extend_from_slice(&throttle_time_ms.to_be_bytes());
     response.extend_from_slice(&[topic_count]);
-    
+
     // Topic data
     response.extend_from_slice(&error_code.to_be_bytes());
     response.extend_from_slice(&[topic_name_len]);
@@ -83,37 +87,37 @@ fn build_describe_topic_partitions_response(correlation_id: u32, topic_name: &st
     response.extend_from_slice(&[partitions_count]);
     response.extend_from_slice(&topic_authorized_operations.to_be_bytes());
     response.extend_from_slice(&[topic_tagged_fields]);
-    
+
     // Next cursor (null) and response tagged fields
     response.extend_from_slice(&[next_cursor_null]);
     response.extend_from_slice(&[response_tagged_fields]);
-    
+
     response
 }
 
 /// Builds APIVersions response
 fn build_api_versions_response(correlation_id: u32, api_version: u16) -> Vec<u8> {
     let error_code: u16 = if api_version <= 4 { 0 } else { 35 };
-    
+
     let response_message_size: u32 = 26;
     let response_message_size_bytes = response_message_size.to_be_bytes();
     let correlation_id_response_bytes = correlation_id.to_be_bytes();
     let error_code_bytes = error_code.to_be_bytes();
 
     let api_count_array: u8 = 3; // 2 APIs + 1 = 3
-    
+
     // First API: APIVersions
     let api_key_1: u16 = 18;
     let min_version_1: u16 = 0;
     let max_version_1: u16 = 4;
     let api_tagged_fields_1: u8 = 0;
-    
+
     // Second API: DescribeTopicPartitions
     let api_key_2: u16 = 75;
     let min_version_2: u16 = 0;
     let max_version_2: u16 = 0;
     let api_tagged_fields_2: u8 = 0;
-    
+
     let throttle_time_ms: u32 = 0;
     let response_tagged_fields: u8 = 0;
 
@@ -122,27 +126,25 @@ fn build_api_versions_response(correlation_id: u32, api_version: u16) -> Vec<u8>
     response.extend_from_slice(&correlation_id_response_bytes);
     response.extend_from_slice(&error_code_bytes);
     response.extend_from_slice(&[api_count_array]);
-    
+
     // First API: APIVersions
     response.extend_from_slice(&api_key_1.to_be_bytes());
     response.extend_from_slice(&min_version_1.to_be_bytes());
     response.extend_from_slice(&max_version_1.to_be_bytes());
     response.extend_from_slice(&[api_tagged_fields_1]);
-    
+
     // Second API: DescribeTopicPartitions
     response.extend_from_slice(&api_key_2.to_be_bytes());
     response.extend_from_slice(&min_version_2.to_be_bytes());
     response.extend_from_slice(&max_version_2.to_be_bytes());
     response.extend_from_slice(&[api_tagged_fields_2]);
-    
+
     response.extend_from_slice(&throttle_time_ms.to_be_bytes());
     response.extend_from_slice(&[response_tagged_fields]);
-    
+
     response
 }
 
-/// Handles a single incoming TCP connection.
-/// Reads the request, extracts the correlation ID, and sends back the response.
 fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     println!("Handling connection from: {}", stream.peer_addr()?);
 
@@ -151,13 +153,12 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         let mut initial_bytes = vec![0; MESSAGE_SIZE_LEN];
 
         let total_message_size = match stream.read_exact(&mut initial_bytes) {
-            Ok(()) => {
-                u32::from_be_bytes(
-                    initial_bytes.as_slice()
-                        .try_into()
-                        .unwrap_or_else(|_| [0; 4])
-                )
-            }
+            Ok(()) => u32::from_be_bytes(
+                initial_bytes
+                    .as_slice()
+                    .try_into()
+                    .unwrap_or_else(|_| [0; 4]),
+            ),
             Err(e) => {
                 println!("Client disconnected: {}", e);
                 break;
@@ -167,7 +168,11 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
         // Basic validation: ensure the message is at least as long as the header (minus the 4 bytes we already read)
         if total_message_size < (HEADER_LEN - MESSAGE_SIZE_LEN) as u32 {
-            println!("Invalid message size {} < {}, breaking connection", total_message_size, HEADER_LEN - MESSAGE_SIZE_LEN);
+            println!(
+                "Invalid message size {} < {}, breaking connection",
+                total_message_size,
+                HEADER_LEN - MESSAGE_SIZE_LEN
+            );
             break;
         }
 
@@ -175,7 +180,7 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         //The total_message_size includes everything after the initial 4 bytes, so we read exactly that amount
         let remaining_bytes = total_message_size as usize;
         let mut full_request_buffer = vec![0; remaining_bytes];
-        
+
         if let Err(e) = stream.read_exact(&mut full_request_buffer) {
             println!("Error reading request body: {}", e);
             break;
@@ -190,11 +195,8 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         }
 
         //Extract the correlation ID from bytes 8-11
-        let correlation_id_bytes_slice = &full_request_buffer[
-            correlation_id_offset_in_remaining
-                ..
-                correlation_id_offset_in_remaining + CORRELATION_ID_LEN
-        ];
+        let correlation_id_bytes_slice = &full_request_buffer[correlation_id_offset_in_remaining
+            ..correlation_id_offset_in_remaining + CORRELATION_ID_LEN];
 
         let correlation_id = match correlation_id_bytes_slice.try_into() {
             Ok(bytes) => u32::from_be_bytes(bytes),
@@ -216,11 +218,8 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
         //Extract the API version
         let api_version_offset = API_KEY_LEN; //Skip API key, those are 2 bytes
-        let api_version_bytes = &full_request_buffer[
-            api_version_offset
-                ..
-                api_version_offset + API_VERSION_LEN
-        ];
+        let api_version_bytes =
+            &full_request_buffer[api_version_offset..api_version_offset + API_VERSION_LEN];
 
         let api_version = match api_version_bytes.try_into() {
             Ok(bytes) => u16::from_be_bytes(bytes),
@@ -231,7 +230,10 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         };
 
         println!("Extracted Correlation ID (u32): {}", correlation_id);
-        println!("Extracted Correlation ID (bytes): {:?}", correlation_id_bytes_slice);
+        println!(
+            "Extracted Correlation ID (bytes): {:?}",
+            correlation_id_bytes_slice
+        );
         println!("Extracted API Key: {}", api_key);
         println!("Extracted API Version: {}", api_version);
 
@@ -249,9 +251,20 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         } else {
             // Unknown API key - return error
             println!("Unknown API key: {}", api_key);
-            vec![0, 0, 0, 8, 
-                 (correlation_id >> 24) as u8, (correlation_id >> 16) as u8, (correlation_id >> 8) as u8, correlation_id as u8,
-                 0, 35, 0, 0] // Error code 35 = UNSUPPORTED_VERSION
+            vec![
+                0,
+                0,
+                0,
+                8,
+                (correlation_id >> 24) as u8,
+                (correlation_id >> 16) as u8,
+                (correlation_id >> 8) as u8,
+                correlation_id as u8,
+                0,
+                35,
+                0,
+                0,
+            ] // Error code 35 = UNSUPPORTED_VERSION
         };
 
         println!("Sending response: {:?}", response);
@@ -277,7 +290,6 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
-
     let listener = TcpListener::bind("127.0.0.1:9092").unwrap();
     println!("Server listening on: {}", listener.local_addr()?);
 

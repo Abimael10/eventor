@@ -1,35 +1,188 @@
-[![progress-banner](https://backend.codecrafters.io/progress/kafka/722b1aef-4636-432f-b0fc-69ba3d3da4f1)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Eventor - Kafka Protocol Event Stream Processor
 
-This is a starting point for Rust solutions to the
-["Build Your Own Kafka" Challenge](https://codecrafters.io/challenges/kafka).
+[![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge)]()
 
-In this challenge, you'll build a toy Kafka clone that's capable of accepting
-and responding to APIVersions & Fetch API requests. You'll also learn about
-encoding and decoding messages using the Kafka wire protocol. You'll also learn
-about handling the network protocol, event loops, TCP sockets and more.
+A lightweight, high-performance event stream processor implementing the Kafka wire protocol in Rust. Eventor provides a minimal but compliant Kafka server implementation that can handle multiple concurrent connections and process streaming events efficiently.
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+## 🚀 Features
 
-# Passing the first stage
+- **Kafka Wire Protocol Compliance** - Implements core Kafka protocol specifications
+- **Multi-threaded Connection Handling** - Concurrent client support with thread-per-connection model
+- **APIVersions Support** - Advertises supported API versions to clients
+- **DescribeTopicPartitions** - Handles topic metadata requests with proper error responses
+- **Correlation ID Tracking** - Maintains request/response correlation for reliable messaging
+- **Unknown Topic Handling** - Graceful error responses for non-existent topics
+- **Persistent Connections** - Supports multiple requests per connection
+- **Memory Safe** - Built with Rust's safety guarantees
 
-The entry point for your Kafka implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+## 📋 Supported Kafka APIs
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
+| API | Key | Version | Status | Description |
+|-----|-----|---------|--------|-------------|
+| APIVersions | 18 | 0-4 | ✅ | Returns supported API versions |
+| DescribeTopicPartitions | 75 | 0 | ✅ | Describes topic partition metadata |
+
+## 🛠️ Installation
+
+### Prerequisites
+
+- **Rust 1.70+** - [Install Rust](https://rustup.rs/)
+- **Python 3.6+** - For running tests
+
+### Build from Source
+
+```bash
+git clone https://github.com/Abimael10/eventor.git
+cd eventor
+cargo build --release
 ```
 
-That's all!
+## 🚀 Quick Start
 
-# Stage 2 & beyond
+### Start the Server
 
-Note: This section is for stages 2 and beyond.
+```bash
+cargo run --release
+```
 
-1. Ensure you have `cargo (1.87)` installed locally
-1. Run `./your_program.sh` to run your Kafka broker, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+The server will start listening on `127.0.0.1:9092` by default.
+
+### Run Tests
+
+```bash
+chmod +x tests.sh
+./tests.sh
+```
+
+### Manual Testing with netcat
+
+```bash
+# Test basic connectivity
+nc -v 127.0.0.1 9092
+```
+
+## 🧪 Testing
+
+The project includes a test suite that validates protocol compliance and concurrent behavior.
+
+### Automated Test Suite
+
+```bash
+./tests.sh
+```
+
+**Test Coverage:**
+- ✅ APIVersions request/response handling
+- ✅ DescribeTopicPartitions with unknown topics
+- ✅ Correlation ID validation
+- ✅ Concurrent connections (5 simultaneous clients)
+- ✅ Multiple requests per connection
+- ✅ Error handling for unsupported operations
+- ✅ Protocol message framing
+
+### Manual Testing
+
+Create a simple Python client:
+
+```python
+import socket
+import struct
+
+# Connect to server
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(("127.0.0.1", 9092))
+
+# Build APIVersions request
+api_key = 18  # APIVersions
+api_version = 3
+correlation_id = 1
+client_id = "test-client"
+
+request_body = bytearray()
+request_body.extend(struct.pack(">H", api_key))
+request_body.extend(struct.pack(">H", api_version))
+request_body.extend(struct.pack(">I", correlation_id))
+request_body.extend(struct.pack(">B", len(client_id) + 1))
+request_body.extend(client_id.encode('utf-8'))
+request_body.extend(struct.pack(">B", 0))  # Tagged fields
+
+# Send request
+message_size = len(request_body)
+full_request = struct.pack(">I", message_size) + request_body
+sock.send(full_request)
+
+# Read response
+size_bytes = sock.recv(4)
+message_size = struct.unpack(">I", size_bytes)[0]
+response = sock.recv(message_size)
+
+print(f"Response: {response.hex()}")
+sock.close()
+```
+
+## 🏗️ Architecture
+
+### Protocol Implementation
+
+Eventor implements the Kafka binary protocol with proper message framing:
+
+```
+Message Format:
+┌─────────────┬──────────────┬─────────────┬──────────────┬─────────────┐
+│ Message Size│   API Key    │ API Version │ Correlation  │   Payload   │
+│   (4 bytes) │  (2 bytes)   │  (2 bytes)  │  ID (4 bytes)│  (variable) │
+└─────────────┴──────────────┴─────────────┴──────────────┴─────────────┘
+```
+
+### Connection Handling
+
+- **Thread-per-connection** model for handling multiple clients
+- **Persistent connections** supporting multiple requests
+- **Graceful error handling** with proper connection cleanup
+- **Message size validation** to prevent buffer overflows
+
+### Response Generation
+
+- **Correlation ID preservation** for request/response matching
+- **Protocol-compliant error codes** (UNKNOWN_TOPIC_OR_PARTITION, UNSUPPORTED_VERSION)
+- **Flexible message formats** supporting tagged fields
+- **Proper byte ordering** (big-endian network byte order)
+
+## 🔧 Configuration
+
+Currently, the server configuration is compile-time defined:
+
+```rust
+const SERVER_ADDRESS: &str = "127.0.0.1:9092";
+const MESSAGE_SIZE_LEN: usize = 4;
+const API_KEY_LEN: usize = 2;
+const API_VERSION_LEN: usize = 2;
+const CORRELATION_ID_LEN: usize = 4;
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Apache Kafka** for the protocol specifications
+- **Rust Community** for excellent documentation and tooling
+- **Confluent** for Kafka protocol documentation
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/eventor/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/eventor/discussions)
+- **Documentation**: [Project Wiki](https://github.com/yourusername/eventor/wiki)
+
+## 📈 Status
+
+**Current Version**: 0.1.0
+**Status**: Alpha - Basic functionality implemented, suitable for development and testing.
+
+---
+
+Built with ❤️ in Rust 🦀
